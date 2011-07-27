@@ -4,22 +4,200 @@
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
+#include <list>
 #include <stdlib.h>
+
+#include <boost/thread.hpp>
+
 #include "CanOpenMaster/CanOpenMaster.h"
+#include "internal/CanChannel.h"
 
 //------------------------------------------------------------------------------
-COM_CanChannel* COM_OpenChannel()
-{
-    return new COM_CanChannel();
-}
+static bool gbInitialised = false;
+static bool gbShuttingDown = false;
+static CanChannel* gpChannelBeingOpened = NULL;
+static CanChannel* gpChannelToBeClosed = NULL;
+static std::list<CanChannel*> gCanChannels;
+static boost::thread gCanOpenMasterThread;
 
 //------------------------------------------------------------------------------
-void COM_CloseChannel( COM_CanChannel** ppChannel )
+void CanOpenMasterThread()
 {
-    if ( NULL != *ppChannel )
+    while ( !gbShuttingDown )
     {
-        delete *ppChannel;
-        *ppChannel = NULL;
+        // Add a new channel if needed
+        if ( NULL != gpChannelBeingOpened )
+        {
+            gCanChannels.push_back( gpChannelBeingOpened );
+            gpChannelBeingOpened = NULL;
+        }
+        
+        // Close a channel if needed
+        if ( NULL != gpChannelToBeClosed )
+        {
+            gCanChannels.remove( gpChannelToBeClosed );
+            
+            delete gpChannelToBeClosed;
+            gpChannelToBeClosed = NULL;
+        }
+        
+        // Update any open channels
+        for ( std::list<CanChannel*>::iterator iter = gCanChannels.begin(); iter != gCanChannels.end(); iter++ )
+        {
+            (*iter)->Update();
+        }
     }
 }
+
+//------------------------------------------------------------------------------
+bool isResponsive()
+{
+    return gbInitialised && !gbShuttingDown;
+}
+
+//------------------------------------------------------------------------------
+bool COM_Init()
+{
+    if ( !gbInitialised )
+    {
+        // Setup module variables
+        gbShuttingDown = false;
+        gpChannelBeingOpened = NULL;
+        gpChannelToBeClosed = NULL;
+        gCanChannels.clear();
+        gCanOpenMasterThread = boost::thread( CanOpenMasterThread );
+        
+        gbInitialised = true;
+    }
+    
+    return gbInitialised;
+}
+
+//------------------------------------------------------------------------------
+void COM_Deinit()
+{
+    if ( gbInitialised )
+    {
+        gbShuttingDown = true;
+        
+        if ( gCanOpenMasterThread.joinable() )
+        {
+            gCanOpenMasterThread.join();
+        }
+        
+        // Close any channels that are still open
+        for ( std::list<CanChannel*>::iterator iter = gCanChannels.begin(); iter != gCanChannels.end(); iter++ )
+        {
+            delete (*iter);
+        }
+        gCanChannels.clear();
+        
+        gbInitialised = false;
+    }
+}
+
+//------------------------------------------------------------------------------
+COM_CanChannelHandle COM_OpenChannel( const char* deviceName, 
+                                      const char* baudRate,
+                                      const COM_CanChannelCallbacks& callbacks )
+{
+    if ( !gbInitialised )
+    {
+        return NULL;
+    }
+    
+    COM_CanChannelHandle handle = NULL;
+    
+    CanChannel* pChannel = CanChannel::OpenCanChannel( deviceName, baudRate, callbacks );
+    if ( NULL != pChannel )
+    {
+        while ( NULL != gpChannelBeingOpened );  // Block until the variable is free
+        gpChannelBeingOpened = pChannel;
+        
+        handle = (COM_CanChannelHandle)pChannel;
+    }
+    
+    return handle;
+}
+
+//------------------------------------------------------------------------------
+void COM_CloseChannel( COM_CanChannelHandle* pHandle )
+{
+    if ( isResponsive() )
+    {
+        while ( NULL != gpChannelToBeClosed );  // Block until the variable is free
+        
+        gpChannelToBeClosed = (CanChannel*)(*pHandle);
+        
+        while ( NULL != gpChannelToBeClosed );  // Block until the channel is closed
+        *pHandle = NULL;
+    }
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueNmtStartRemoteNode( COM_CanChannelHandle handle, uint8_t nodeId )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueNmtMessage( nodeId, eNMT_StartRemoteNode );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueNmtStopRemoteNode( COM_CanChannelHandle handle, uint8_t nodeId )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueNmtMessage( nodeId, eNMT_StopRemoteNode );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueNmtEnterPreOperational( COM_CanChannelHandle handle, uint8_t nodeId )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueNmtMessage( nodeId, eNMT_EnterPreOperational );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueNmtResetNode( COM_CanChannelHandle handle, uint8_t nodeId )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueNmtMessage( nodeId, eNMT_ResetNode );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueNmtResetCommunication( COM_CanChannelHandle handle, uint8_t nodeId )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueNmtMessage( nodeId, eNMT_ResetCommunication );
+    }
+    
+    return bQueued;
+}
+
+
 
