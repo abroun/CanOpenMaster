@@ -32,7 +32,7 @@ struct NmtSlot
     uint8_t mNodeId;
     
     // Flags
-    bool mbFull : 1;                // Set by user, cleared by CanOpenMaster
+    bool mbFull;                    // Set by user, cleared by CanOpenMaster
  };
 
 //------------------------------------------------------------------------------
@@ -50,9 +50,13 @@ struct SdoSlot
     boost::posix_time::ptime mLastSendTime;
     
     // Flags
-    bool mbFull : 1;                // Set by user, cleared by CanOpenMaster
-    bool mbShouldBeDeleted : 1;     // Set by user, cleared by CanOpenMaster
-    bool mbSentAtLeastOnce : 1;     // Set by CanOpenMaster, cleared by CanOpenMaster
+    // TODO: I'm assuming that reading from or writing to a flag value will be
+    // atomic and that race conditions will be avoided because one thread takes
+    // the responsibility for setting it and the other takes the responsibility
+    // for clearing it
+    bool mbFull;                    // Set by user, cleared by CanOpenMaster
+    bool mbShouldBeDeleted;         // Set by user, cleared by CanOpenMaster
+    bool mbSentAtLeastOnce;         // Set by CanOpenMaster, cleared by CanOpenMaster
 };
 
 //------------------------------------------------------------------------------
@@ -88,8 +92,12 @@ class CanChannel
     public: bool QueueNmtMessage( uint8_t nodeId, eNmtMessageType messageType );
     
     //--------------------------------------------------------------------------
-    // SDO
-    //--------------------------------------------------------------------------
+    // These routines attempt to queue SDO messages and return false if there
+    // is already a message pending for that node and message type
+    public: bool QueueSdoReadMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex, 
+        COM_SdoReadCallback readCB );
+    public: bool QueueSdoWriteMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex, 
+        COM_SdoWriteCallback writeCB, uint8_t* pData, uint8_t numBytes );
     
     //--------------------------------------------------------------------------    
     // Processes a SDO slot and returns true if a message should be sent
@@ -103,6 +111,9 @@ class CanChannel
     private: void SendSdoReadMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex ) const;
     private: void SendSdoWriteMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex, 
         uint8_t* pData, uint8_t numBytes ) const;
+    
+    // Process messages that come from the CANBUS
+    private: void ProcessMessages();
         
     // Thread for reading from the CANBUS
     private: static void CanOpenReadThread( CanChannel* pThis );
@@ -121,6 +132,11 @@ class CanChannel
     private: NmtSlot mNmtSlots[ eNMT_NumNmtMessageTypes ];
     private: SdoReadSlot mSdoReadSlots[ 128 ];
     private: SdoWriteSlot mSdoWriteSlots[ 128 ];
+    
+    private: static const uint32_t MESSAGE_BUFFER_SIZE = 1024;
+    private: COM_CanMessage mMessageBuffer[ MESSAGE_BUFFER_SIZE ];
+    private: uint32_t mMessageProduceCount;
+    private: uint32_t mMessageConsumeCount;
 };
 
 #endif // CAN_CHANNEL_H

@@ -43,6 +43,19 @@ COM_CanChannelHandle COM_OpenChannel( const char* deviceName,
 void COM_CloseChannel( COM_CanChannelHandle* pHandle );
 
 //------------------------------------------------------------------------------
+// SDO
+//------------------------------------------------------------------------------
+// These routines attempt to queue SDO messages and return false if there
+// is already a message pending for that node and message type
+bool COM_QueueSdoReadMsg( COM_CanChannelHandle handle, uint8_t nodeId, 
+                          uint16_t index, uint8_t subIndex, 
+                          COM_SdoReadCallback readCB );
+bool COM_QueueSdoWriteMsg( COM_CanChannelHandle handle, uint8_t nodeId,
+                           uint16_t index, uint8_t subIndex, 
+                           COM_SdoWriteCallback writeCB, 
+                           uint8_t* pData, uint8_t numBytes );
+
+//------------------------------------------------------------------------------
 // NMT
 //------------------------------------------------------------------------------
 // These routines will attempt to queue a NMT message for sending and will

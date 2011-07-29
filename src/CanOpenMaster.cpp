@@ -135,6 +135,38 @@ void COM_CloseChannel( COM_CanChannelHandle* pHandle )
 }
 
 //------------------------------------------------------------------------------
+bool COM_QueueSdoReadMsg( COM_CanChannelHandle handle, uint8_t nodeId, 
+                          uint16_t index, uint8_t subIndex, 
+                          COM_SdoReadCallback readCB )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueSdoReadMsg( nodeId, index, subIndex, readCB );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
+bool COM_QueueSdoWriteMsg( COM_CanChannelHandle handle, uint8_t nodeId,
+                           uint16_t index, uint8_t subIndex, 
+                           COM_SdoWriteCallback writeCB, 
+                           uint8_t* pData, uint8_t numBytes )
+{
+    bool bQueued = false;
+    
+    if ( isResponsive() && NULL != handle )
+    {
+        bQueued = ((CanChannel*)handle)->QueueSdoWriteMsg( nodeId, index, subIndex, 
+                                                           writeCB, pData, numBytes );
+    }
+    
+    return bQueued;
+}
+
+//------------------------------------------------------------------------------
 bool COM_QueueNmtStartRemoteNode( COM_CanChannelHandle handle, uint8_t nodeId )
 {
     bool bQueued = false;
