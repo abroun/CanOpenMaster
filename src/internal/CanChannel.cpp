@@ -402,6 +402,7 @@ void CanChannel::CanOpenReadThread( CanChannel* pThis )
         if ( MESSAGE_BUFFER_SIZE == pThis->mMessageProduceCount - pThis->mMessageConsumeCount )
         {
             // Spin whilst the message buffer is full
+            boost::thread::yield();
             continue;
         }
  
@@ -411,6 +412,10 @@ void CanChannel::CanOpenReadThread( CanChannel* pThis )
         {
             pThis->mMessageBuffer[ pThis->mMessageProduceCount % MESSAGE_BUFFER_SIZE ] = msg;
             pThis->mMessageProduceCount++;
+        }
+        else
+        {
+            boost::thread::yield();
         }
     }
     

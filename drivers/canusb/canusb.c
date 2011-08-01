@@ -61,7 +61,7 @@ static FTDIContext gContext;
 static eVerbosity gVerbosity = eV_Error;
 
 static RollingBuffer gReadBuffer;
-static unsigned char gReadBufferData[ 16*1024 ];
+static unsigned char gReadBufferData[ 64*1024 ];
 
 //------------------------------------------------------------------------------
 void LogMsg( eVerbosity verbosity, const char* formatString, ... )
@@ -102,6 +102,7 @@ void ReadDataIntoBuffer()
             if ( !RB_TryToAddBytes( &gReadBuffer, (unsigned char*)chunkBuffer, numBytesRead ) )
             {
                 LogMsg( eV_Error, "Error: Read buffer overflow\n" );
+                bFinished = true;
             }
         }
     }
@@ -379,9 +380,7 @@ uint8_t COM_DriverReceiveMessage( COM_DriverHandle handle, COM_CanMessage* pMsgO
         return 1;
     }
     
-    LogMsg( eV_Info, "Trying to read message\n" );
-    
-    ReadDataIntoBuffer();
+    LogMsg( eV_Info, "Trying to read message\n" );    
     
     if ( RB_GetNumBytesInBuffer( &gReadBuffer ) > 0 )
     {
@@ -449,6 +448,8 @@ uint8_t COM_DriverReceiveMessage( COM_DriverHandle handle, COM_CanMessage* pMsgO
         }
         else
         {
+            ReadDataIntoBuffer();
+            //LogMsg( eV_Error, "%i bytes in buffer\n", RB_GetNumBytesInBuffer( &gReadBuffer ) );
             LogMsg( eV_Info, "No message found in buffer. User should retry\n" );                
             
             return 2;
@@ -456,6 +457,9 @@ uint8_t COM_DriverReceiveMessage( COM_DriverHandle handle, COM_CanMessage* pMsgO
     }
     else
     {
+        ReadDataIntoBuffer();
+        //LogMsg( eV_Error, "%i bytes in buffer\n", RB_GetNumBytesInBuffer( &gReadBuffer ) );
+        
         LogMsg( eV_Info, "Nothing to read\n" );         
         LogMsg( eV_Info, "--- Leaving Read Routine\n" );
         return 2;

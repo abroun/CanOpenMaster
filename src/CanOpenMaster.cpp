@@ -23,8 +23,12 @@ static boost::thread gCanOpenMasterThread;
 //------------------------------------------------------------------------------
 void CanOpenMasterThread()
 {
+    static const uint32_t UPDATE_TIME_MS = (uint32_t)(1000.0 *(1.0f/100.0f));   // Time allowed for one loop to run at 100fps
+    
     while ( !gbShuttingDown )
     {
+        boost::posix_time::ptime startTime = boost::get_system_time();
+        
         // Add a new channel if needed
         if ( NULL != gpChannelBeingOpened )
         {
@@ -46,6 +50,9 @@ void CanOpenMasterThread()
         {
             (*iter)->Update();
         }
+        
+        boost::posix_time::ptime idealEndTime = startTime + boost::posix_time::milliseconds( UPDATE_TIME_MS );
+        boost::thread::sleep( idealEndTime );
     }
 }
 
