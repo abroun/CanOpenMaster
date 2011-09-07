@@ -160,7 +160,7 @@ bool COM_QueueSdoReadMsg( COM_CanChannelHandle handle, uint8_t nodeId,
 bool COM_QueueSdoWriteMsg( COM_CanChannelHandle handle, uint8_t nodeId,
                            uint16_t index, uint8_t subIndex, 
                            COM_SdoWriteCallback writeCB, 
-                           uint8_t* pData, uint8_t numBytes )
+                           const uint8_t* pData, uint8_t numBytes )
 {
     bool bQueued = false;
     

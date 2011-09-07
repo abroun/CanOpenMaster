@@ -97,7 +97,7 @@ class CanChannel
     public: bool QueueSdoReadMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex, 
         COM_SdoReadCallback readCB );
     public: bool QueueSdoWriteMsg( uint8_t nodeId, uint16_t index, uint8_t subIndex, 
-        COM_SdoWriteCallback writeCB, uint8_t* pData, uint8_t numBytes );
+        COM_SdoWriteCallback writeCB, const uint8_t* pData, uint8_t numBytes );
     
     //--------------------------------------------------------------------------    
     // Processes a SDO slot and returns true if a message should be sent

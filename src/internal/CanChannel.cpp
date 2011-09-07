@@ -170,7 +170,7 @@ bool CanChannel::QueueSdoReadMsg( uint8_t nodeId, uint16_t index,
 //------------------------------------------------------------------------------
 bool CanChannel::QueueSdoWriteMsg( uint8_t nodeId, uint16_t index, 
                                    uint8_t subIndex, COM_SdoWriteCallback writeCB,
-                                   uint8_t* pData, uint8_t numBytes )
+                                   const uint8_t* pData, uint8_t numBytes )
 {
     assert( nodeId < 128 );
     assert( numBytes >= 1 && numBytes <= 4 );
