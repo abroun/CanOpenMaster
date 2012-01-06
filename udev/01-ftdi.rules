@@ -1,0 +1,2 @@
+# FTDI USB CANBUS device
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="ffa8", ENV{ACL_MANAGE}="1"

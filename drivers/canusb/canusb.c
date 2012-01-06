@@ -601,7 +601,8 @@ COM_DriverHandle COM_DriverOpen( const char* deviceName, const char* baudRate )
     int result = ftdi_usb_open( &gContext, CANUSB_VENDOR_ID, CANUSB_PRODUCT_ID );
     if( result < 0 ) 
     {
-        LogMsg( eV_Error, "Error: ftdi_usb_open failed. result=%d\n", result );
+        LogMsg( eV_Error, "Error: ftdi_usb_open failed. result=%d - %s\n", result, gContext.error_str );
+	LogMsg( eV_Error, "=== Did you install udev/01-ftdi.rules?\n" );
         ftdi_deinit( &gContext );
         return NULL;
     }

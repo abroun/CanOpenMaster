@@ -1,0 +1,6 @@
+Getting CANUSB to work
+=======================
+
+In order to be able to use the CANUSB driver without running as root you need to copy udev/01-ftdi.rules to your /etc/udev/rules.d directory.
+
+This will enable ACL (Access Control Lists) for the device which in some way allows a non-root user to use the device
