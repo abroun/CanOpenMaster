@@ -5,12 +5,16 @@
 
 //------------------------------------------------------------------------------
 #include <list>
+#include <map>
+#include <stdexcept>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include <boost/thread.hpp>
 
 #include "CanOpenMaster/CanOpenMaster.h"
 #include "internal/CanChannel.h"
+#include "internal/CanDriver.h"
 
 //------------------------------------------------------------------------------
 static bool gbInitialised = false;
@@ -19,6 +23,7 @@ static CanChannel* gpChannelBeingOpened = NULL;
 static CanChannel* gpChannelToBeClosed = NULL;
 static std::list<CanChannel*> gCanChannels;
 static boost::thread gCanOpenMasterThread;
+static std::map<std::string,CanDriver*> gDriverMap;
 
 //------------------------------------------------------------------------------
 void CanOpenMasterThread()
@@ -93,18 +98,26 @@ void COM_Deinit()
         }
         
         // Close any channels that are still open
-        for ( std::list<CanChannel*>::iterator iter = gCanChannels.begin(); iter != gCanChannels.end(); iter++ )
+        for ( auto iter = gCanChannels.begin(); iter != gCanChannels.end(); iter++ )
         {
             delete (*iter);
         }
         gCanChannels.clear();
+
+        // Close any drivers
+        for ( auto iter = gDriverMap.begin(); iter != gDriverMap.end(); iter++ )
+        {
+            delete iter->second;
+        }
+        gDriverMap.clear();
         
         gbInitialised = false;
     }
 }
 
 //------------------------------------------------------------------------------
-COM_CanChannelHandle COM_OpenChannel( const char* deviceName, 
+COM_CanChannelHandle COM_OpenChannel( const char* driverLibraryName,
+                                      const char* deviceName,
                                       const char* baudRate,
                                       const COM_CanChannelCallbacks& callbacks )
 {
@@ -114,14 +127,38 @@ COM_CanChannelHandle COM_OpenChannel( const char* deviceName,
     }
     
     COM_CanChannelHandle handle = NULL;
+    CanDriver* pDriver = NULL;
     
-    CanChannel* pChannel = CanChannel::OpenCanChannel( deviceName, baudRate, callbacks );
-    if ( NULL != pChannel )
+    // Look to see if the driver library has already been opened
+    auto mapIter = gDriverMap.find( driverLibraryName );
+    if ( gDriverMap.end() == mapIter )
     {
-        while ( NULL != gpChannelBeingOpened );  // Block until the variable is free
-        gpChannelBeingOpened = pChannel;
-        
-        handle = (COM_CanChannelHandle)pChannel;
+        try
+        {
+            pDriver = new CanDriver( driverLibraryName );
+            gDriverMap[ driverLibraryName ] = pDriver;
+        }
+        catch ( std::exception& e )
+        {
+            // Unable to load driver
+            fprintf( stderr, "Error: Unable to load driver. Error was %s", e.what() );
+        }
+    }
+    else
+    {
+        pDriver = mapIter->second;
+    }
+
+    if ( NULL != pDriver )
+    {
+        CanChannel* pChannel = CanChannel::OpenCanChannel( pDriver, deviceName, baudRate, callbacks );
+        if ( NULL != pChannel )
+        {
+            while ( NULL != gpChannelBeingOpened );  // Block until the variable is free
+            gpChannelBeingOpened = pChannel;
+
+            handle = (COM_CanChannelHandle)pChannel;
+        }
     }
     
     return handle;

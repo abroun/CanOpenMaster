@@ -12,7 +12,7 @@
 #include <ftdi.h>
 
 #include "CanOpenMaster/can.h"
-#include "RollingBuffer.h"
+#include "drivers/common/RollingBuffer.h"
 
 // This driver is limited at the moment in that you are only able
 // to have the one CANUSB device active at any one time
@@ -370,7 +370,7 @@ bool canusbToCanMsg( char* p, int numBytes, COM_CanMessage* pMsg )
 }
 
 //------------------------------------------------------------------------------
-uint8_t COM_DriverReceiveMessage( COM_DriverHandle handle, COM_CanMessage* pMsgOut )
+uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgOut )
 {
     LogMsg( eV_Info, "--- Entering Read Routine\n" );
     
@@ -467,7 +467,7 @@ uint8_t COM_DriverReceiveMessage( COM_DriverHandle handle, COM_CanMessage* pMsgO
 }
 
 //------------------------------------------------------------------------------
-uint8_t COM_DriverSendMessage( COM_DriverHandle handle, COM_CanMessage* pMsg )
+uint8_t COM_DriverSendMessage( COM_DeviceHandle handle, COM_CanMessage* pMsg )
 {
     LogMsg( eV_Info, "--- Entering Send Routine\n" );
     
@@ -573,11 +573,11 @@ eBaudRate TranslateBaudRate( const char* optarg )
 }*/
 
 //------------------------------------------------------------------------------
-COM_DriverHandle COM_DriverOpen( const char* deviceName, const char* baudRate )
+COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudRate )
 {
     if ( eDS_Active == gDriverState )
     {
-        return (COM_DriverHandle)&gContext;
+        return (COM_DeviceHandle)&gContext;
     }
     
     LogMsg( eV_Info, "Trying to open CANUSB driver\n" );
@@ -650,11 +650,11 @@ COM_DriverHandle COM_DriverOpen( const char* deviceName, const char* baudRate )
     
     // Success
     gDriverState = eDS_Active;
-    return (COM_DriverHandle)&gContext;
+    return (COM_DeviceHandle)&gContext;
 }
 
 //------------------------------------------------------------------------------
-void COM_DriverClose( COM_DriverHandle handle )
+void COM_DriverDeviceClose( COM_DeviceHandle handle )
 {
     if ( eDS_Inactive != gDriverState )
     {

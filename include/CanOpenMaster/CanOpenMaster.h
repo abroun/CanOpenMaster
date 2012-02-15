@@ -36,7 +36,8 @@ typedef struct
 bool COM_Init();
 void COM_Deinit();
 
-COM_CanChannelHandle COM_OpenChannel( const char* deviceName, 
+COM_CanChannelHandle COM_OpenChannel( const char* driverLibraryName,
+                                       const char* deviceName,
                                        const char* baudRate,
                                        const COM_CanChannelCallbacks& callbacks );
 

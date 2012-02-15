@@ -52,25 +52,26 @@ CanChannel::~CanChannel()
         mReadThread.join();
     }
     
-    // Close down the driver
-    if ( NULL != mDriverHandle )
+    // Close down the device
+    if ( NULL != mDeviceHandle )
     {
-        COM_DriverClose( mDriverHandle );
-        mDriverHandle = NULL;
+        mpDriver->closeDevice( mDeviceHandle );
+        mDeviceHandle = NULL;
     }
 }
 
 //------------------------------------------------------------------------------
-CanChannel* CanChannel::OpenCanChannel( const char* deviceName, const char* baudRate,
+CanChannel* CanChannel::OpenCanChannel( CanDriver* pDriver, const char* deviceName, const char* baudRate,
                                         const COM_CanChannelCallbacks& callbacks )
 {
     CanChannel* pChannel = NULL;
     
-    COM_DriverHandle driverHandle = COM_DriverOpen( deviceName, baudRate );
-    if ( NULL != driverHandle )
+    COM_DeviceHandle deviceHandle = pDriver->openDevice( deviceName, baudRate );
+    if ( NULL != deviceHandle )
     {
         pChannel = new CanChannel();
-        pChannel->mDriverHandle = driverHandle;
+        pChannel->mpDriver = pDriver;
+        pChannel->mDeviceHandle = deviceHandle;
         pChannel->mCallbacks = callbacks;
         
         // Start up a thread for reading messages from the CANBUS
@@ -257,7 +258,7 @@ void CanChannel::SendNmtMessage( uint8_t nodeId, eNmtMessageType messageType ) c
     
     msg.mData[ 1 ] = nodeId;
     
-    COM_DriverSendMessage( mDriverHandle, &msg );
+    mpDriver->sendMessage( mDeviceHandle, &msg );
 }
 
 //------------------------------------------------------------------------------
@@ -270,7 +271,7 @@ void CanChannel::SendSdoReadMsg( uint8_t nodeId, uint16_t index, uint8_t subInde
     *((uint16_t*)&msg.mData[ 1 ]) = index;
     msg.mData[ 3 ] = subIndex;
     
-    COM_DriverSendMessage( mDriverHandle, &msg );
+    mpDriver->sendMessage( mDeviceHandle, &msg );
 }
 
 //------------------------------------------------------------------------------
@@ -291,7 +292,7 @@ void CanChannel::SendSdoWriteMsg( uint8_t nodeId, uint16_t index, uint8_t subInd
         msg.mData[ 4 + i ] = pData[ i ];
     }
     
-    COM_DriverSendMessage( mDriverHandle, &msg );
+    mpDriver->sendMessage( mDeviceHandle, &msg );
 }            
 
 //------------------------------------------------------------------------------
@@ -408,7 +409,7 @@ void CanChannel::CanOpenReadThread( CanChannel* pThis )
  
         // Read the next message from the CANBUS
         COM_CanMessage msg;
-        if ( COM_DriverReceiveMessage( pThis->mDriverHandle, &msg ) == 0 )
+        if ( pThis->mpDriver->receiveMessage( pThis->mDeviceHandle, &msg ) == 0 )
         {
             pThis->mMessageBuffer[ pThis->mMessageProduceCount % MESSAGE_BUFFER_SIZE ] = msg;
             pThis->mMessageProduceCount++;
@@ -424,7 +425,7 @@ void CanChannel::CanOpenReadThread( CanChannel* pThis )
                                    
 //------------------------------------------------------------------------------
 CanChannel::CanChannel()
-    : mDriverHandle( NULL ),
+    : mDeviceHandle( NULL ),
     mbShuttingDown( false ),
     mMessageProduceCount( 0 ),
     mMessageConsumeCount( 0 )

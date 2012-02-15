@@ -13,6 +13,7 @@
 
 #include "CanOpenMaster/CanOpenMaster.h"
 #include "CanOpenMaster/can.h"
+#include "CanDriver.h"
 
 //------------------------------------------------------------------------------
 enum eNmtMessageType
@@ -79,8 +80,8 @@ class CanChannel
     //--------------------------------------------------------------------------
     public: virtual ~CanChannel();
     
-    public: static CanChannel* OpenCanChannel( 
-        const char* deviceName, const char* baudRate,
+    public: static CanChannel* OpenCanChannel(
+        CanDriver* pDriver, const char* deviceName, const char* baudRate,
         const COM_CanChannelCallbacks& callbacks );
 
     //--------------------------------------------------------------------------
@@ -125,7 +126,8 @@ class CanChannel
     //--------------------------------------------------------------------------    
     // Members                             
     private: COM_CanChannelCallbacks mCallbacks;
-    private: COM_DriverHandle mDriverHandle;
+    private: CanDriver* mpDriver;
+    private: COM_DeviceHandle mDeviceHandle;
     private: bool mbShuttingDown;
     private: boost::thread mReadThread;
     
