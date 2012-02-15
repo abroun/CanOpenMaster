@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 //------------------------------------------------------------------------------
-#ifndef CAN_H
-#define CAN_H
+#ifndef COM_CAN_H
+#define COM_CAN_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,4 +33,4 @@ typedef uint8_t (*COM_DriverReceiveMessageFn)( COM_DeviceHandle handle, COM_CanM
 }
 #endif
 
-#endif // CAN_H
+#endif // COM_CAN_H

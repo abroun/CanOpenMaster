@@ -12,6 +12,7 @@
 #include <ftdi.h>
 
 #include "CanOpenMaster/can.h"
+#include "drivers/common/Logging.h"
 #include "drivers/common/RollingBuffer.h"
 
 // This driver is limited at the moment in that you are only able
@@ -46,36 +47,14 @@ typedef enum eBaudRate
     eBR_1M,
 } eBaudRate;
 
-typedef enum eVerbosity
-{
-    eV_Invalid = -1,
-    eV_Silent = 0,
-    eV_Error,
-    eV_Warning,
-    eV_Info
-} eVerbosity;
+
 
 static eBaudRate gBaudRate = eBR_125K;
 static eDriverState gDriverState = eDS_Inactive;
 static FTDIContext gContext;
-static eVerbosity gVerbosity = eV_Error;
 
 static RollingBuffer gReadBuffer;
 static unsigned char gReadBufferData[ 64*1024 ];
-
-//------------------------------------------------------------------------------
-void LogMsg( eVerbosity verbosity, const char* formatString, ... )
-{
-    if ( verbosity <= gVerbosity )
-    {
-        va_list argList;
-        va_start( argList, formatString );
-
-        vprintf( formatString, argList );
-        
-        va_end( argList );
-    }
-}
 
 //------------------------------------------------------------------------------
 void ReadDataIntoBuffer()

@@ -38,6 +38,7 @@ INSTALL( DIRECTORY ${PROJECT_SOURCE_DIR}/include/CanOpenMaster DESTINATION inclu
 #-------------------------------------------------------------------------------
 SET( CanUSBDriverFiles 
     drivers/canusb/canusb.c
+    drivers/common/Logging.c
     drivers/common/RollingBuffer.c
     ) 
 
@@ -48,6 +49,24 @@ SET_TARGET_PROPERTIES( CanUSBDriverShared
 TARGET_LINK_LIBRARIES( CanUSBDriverShared ftdi )
 
 INSTALL( TARGETS CanUSBDriverShared
+        LIBRARY DESTINATION lib )
+        
+#-------------------------------------------------------------------------------
+# SocketCAN driver
+#-------------------------------------------------------------------------------
+SET( SocketCanDriverFiles 
+    drivers/socketcan/socketcan.c
+    drivers/common/Logging.c
+    drivers/common/RollingBuffer.c
+    ) 
+
+ADD_LIBRARY( SocketCanDriverShared SHARED ${SocketCanDriverFiles} )
+SET_TARGET_PROPERTIES( SocketCanDriverShared 
+    PROPERTIES OUTPUT_NAME SocketCanDriver )
+    
+TARGET_LINK_LIBRARIES( SocketCanDriverShared )
+
+INSTALL( TARGETS SocketCanDriverShared
         LIBRARY DESTINATION lib )
 
 #-------------------------------------------------------------------------------
