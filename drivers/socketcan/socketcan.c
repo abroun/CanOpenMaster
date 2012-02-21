@@ -1,6 +1,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+
+#define __USE_MISC
 #include <net/if.h>
 
 #include <linux/can.h>
@@ -35,122 +37,90 @@ typedef enum eDriverState
     eDS_Active
 } eDriverState;
 
-typedef enum eBaudRate
+typedef struct
 {
-    eBR_Invalid = -1,
-    eBR_10K = 0,
-    eBR_20K,
-    eBR_50K,
-    eBR_100K,
-    eBR_125K,
-    eBR_250K,
-    eBR_500K,
-    eBR_800K,
-    eBR_1M,
-} eBaudRate;
+    char mName[ IF_NAMESIZE ];
+    int32_t mSocketId;
+    bool mbInUse;
+    RollingBuffer mReadBuffer;
+    uint8_t mReadBufferData[ 64*1024 ];
+} CanDeviceData;
 
-static eBaudRate gBaudRate = eBR_125K;
 static eDriverState gDriverState = eDS_Inactive;
 
-static RollingBuffer gReadBuffer;
-static unsigned char gReadBufferData[ 64*1024 ];
+#define MAX_NUM_DEVICES 4
+static CanDeviceData gDevices[ MAX_NUM_DEVICES ];
+
+//--------------------------------------------------------------------------------------------------
+static int32_t handleToDeviceIdx( COM_DeviceHandle handle )
+{
+    char data[ sizeof( handle ) ];
+    *((COM_DeviceHandle*)data) = handle;
+
+    int32_t firstByte = sizeof( handle ) - sizeof( int32_t );
+    return *((int32_t*)&data[ firstByte ]) - 1;
+}
+
+//--------------------------------------------------------------------------------------------------
+static COM_DeviceHandle deviceIdxToHandle( int32_t deviceIdx )
+{
+    char data[ sizeof( COM_DeviceHandle ) ];
+    int32_t firstByte = sizeof( COM_DeviceHandle ) - sizeof( int32_t );
+    *((int32_t*)&data[ firstByte ]) = deviceIdx + 1;
+
+    return *((COM_DeviceHandle*)data);
+}
 
 //--------------------------------------------------------------------------------------------------
 uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgOut )
 {
     LogMsg( eV_Info, "--- Entering Read Routine\n" );
 
-/*    if ( eDS_Inactive == gDriverState )
+    int32_t deviceIdx = handleToDeviceIdx( handle );
+    if ( deviceIdx < 0 || deviceIdx >= MAX_NUM_DEVICES
+        || !gDevices[ deviceIdx ].mbInUse )
     {
-        LogMsg( eV_Info, "--- Leaving Read Routine\n" );
+        LogMsg( eV_Error, "Invalid device handle\n" );
         return 1;
     }
 
-    LogMsg( eV_Info, "Trying to read message\n" );
+    struct can_frame frame;
 
-    if ( RB_GetNumBytesInBuffer( &gReadBuffer ) > 0 )
+    ssize_t nbytes = read( gDevices[ deviceIdx ].mSocketId, &frame, sizeof(struct can_frame) );
+
+    if ( nbytes <= 0 )
     {
-        char readBuffer[ READ_BUFFER_CHUNK_SIZE ];
-        unsigned int numBytesRead = RB_PeekAtBytes( &gReadBuffer, (unsigned char*)readBuffer, sizeof( readBuffer ) );
-        bool bMsgRead = false;
-        int replyStartIdx = 0;
-        int numBytesUsed = 0;
-
-        for ( int byteIdx = 0; byteIdx < numBytesRead; byteIdx++ )
-        {
-            if ( CANUSB_SUCCESS_BYTE == readBuffer[ byteIdx ] )
-            {
-                LogMsg( eV_Info, "Got success byte\n" );
-
-                int numBytes = byteIdx - replyStartIdx;
-                if ( numBytes > 0 )
-                {
-                    if ( 1 == numBytes
-                        && 'z' == readBuffer[ byteIdx - 1 ] )
-                    {
-                        // This is a +ve send response. Ignore it
-                    }
-                    else
-                    {
-                        LogMsg( eV_Info, "%i bytes of data\n", numBytes );
-                        bMsgRead = canusbToCanMsg( &readBuffer[ replyStartIdx ], numBytes, pMsgOut );
-                    }
-
-                    if ( !bMsgRead )
-                    {
-                        replyStartIdx = byteIdx + 1;
-                    }
-                    else
-                    {
-                        LogMsg( eV_Info, "Message read!\n" );
-                        LogMsg( eV_Info, "%i bytes left\n", (numBytesRead - byteIdx)-1 );
-                        numBytesUsed = byteIdx + 1;
-                        break;  // Break out of checking loop
-                    }
-                }
-                else
-                {
-                    LogMsg( eV_Info, "No data with success byte\n" );
-                    LogMsg( eV_Info, "%i bytes left\n", (numBytesRead - byteIdx)-1 );
-                    numBytesUsed = byteIdx + 1;
-                    break;  // Break out of checking loop
-                }
-            }
-            else if ( CANUSB_FAIL_BYTE == readBuffer[ byteIdx ] )
-            {
-                LogMsg( eV_Info, "Got fail byte\n" );
-                LogMsg( eV_Info, "%i bytes left\n", (numBytesRead - byteIdx)-1 );
-                numBytesUsed = byteIdx + 1;
-                break;  // Break out of checking loop
-            }
-        }
-
-        RB_AdvanceBuffer( &gReadBuffer, numBytesUsed );
-
-        if ( bMsgRead )
-        {
-            LogMsg( eV_Info, "--- Leaving Read Routine\n" );
-            return 0;
-        }
-        else
-        {
-            ReadDataIntoBuffer();
-            //LogMsg( eV_Error, "%i bytes in buffer\n", RB_GetNumBytesInBuffer( &gReadBuffer ) );
-            LogMsg( eV_Info, "No message found in buffer. User should retry\n" );
-
-            return 2;
-        }
-    }
-    else
-    {
-        ReadDataIntoBuffer();
-        //LogMsg( eV_Error, "%i bytes in buffer\n", RB_GetNumBytesInBuffer( &gReadBuffer ) );
-
-        LogMsg( eV_Info, "Nothing to read\n" );
-        LogMsg( eV_Info, "--- Leaving Read Routine\n" );
+        LogMsg( eV_Info, "No message found in buffer. User should retry\n" );
         return 2;
-    }*/
+    }
 
+    if ( nbytes < sizeof(struct can_frame) )
+    {
+        LogMsg( eV_Error, "Incomplete CAN frame\n" );
+        return 1;
+    }
+
+    /*
+     * Controller Area Network Identifier structure
+     *
+     * bit 0-28 : CAN identifier (11/29 bit)
+     * bit 29   : error frame flag (0 = data frame, 1 = error frame)
+     * bit 30   : remote transmission request flag (1 = rtr frame)
+     * bit 31   : frame format flag (0 = standard 11 bit, 1 = extended 29 bit)
+     */
+
+    if ( frame.can_id & 0x80000000 )
+    {
+        LogMsg( eV_Error, "Extended address received. Not handled yet\n" );
+        return 1;
+    }
+
+    pMsgOut->mRtr = ( frame.can_id & 0x40000000 ? 1 : 0 );
+    pMsgOut->mCobId = frame.can_id & 0x7FF;
+    pMsgOut->mLength = frame.can_dlc;
+    memcpy( pMsgOut->mData, frame.data, sizeof( frame.data ) );
+
+    LogMsg( eV_Info, "--- Message read\n" );
     return 0;
 }
 
@@ -159,181 +129,145 @@ uint8_t COM_DriverSendMessage( COM_DeviceHandle handle, COM_CanMessage* pMsg )
 {
     LogMsg( eV_Info, "--- Entering Send Routine\n" );
 
-/*    if ( eDS_Inactive == gDriverState )
+    int32_t deviceIdx = handleToDeviceIdx( handle );
+    if ( deviceIdx < 0 || deviceIdx >= MAX_NUM_DEVICES
+        || !gDevices[ deviceIdx ].mbInUse )
     {
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
-        return 1;
-    }
-    if ( (pMsg->mCobId & 0xF800) != 0 )
-    {
-        LogMsg( eV_Error, "Error: Driver can't handle 29-bit ids yet\n" );
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
-        return 1;
-    }
-    if ( 0 != pMsg->mRtr )
-    {
-        LogMsg( eV_Error, "Error: Driver can't send RTR bit yet\n" );
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
-        return 1;
-    }
-    if ( pMsg->mLength > 8 )
-    {
-        LogMsg( eV_Error, "Error: Too many bytes\n" );
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
+        LogMsg( eV_Error, "Invalid device handle\n" );
         return 1;
     }
 
-    char commandBuffer[ 128 ];
-    char* pCurByte = commandBuffer;
-    sprintf( pCurByte, "t%X%X%X%X",
-             (pMsg->mCobId & 0x700) >> 8, (pMsg->mCobId & 0xF0) >> 4,
-             (pMsg->mCobId & 0xF), (pMsg->mLength & 0xF) );
-    pCurByte += 5;
-
-    for ( int i = 0; i < pMsg->mLength; i++ )
+    // Send a message to the CAN bus
+    struct can_frame frame;
+    frame.can_id = pMsg->mCobId;
+    if ( pMsg->mRtr )
     {
-        sprintf( pCurByte, "%02X", pMsg->mData[ i ] );
-        pCurByte += 2;
+        frame.can_id |= 0x40000000;
     }
 
-    *(pCurByte++) = '\r';  // Terminate command
-    *(pCurByte++) = '\0';
+    frame.can_dlc = pMsg->mLength;
+    memcpy( frame.data, pMsg->mData, sizeof( pMsg->mData ) );
 
-    LogMsg( eV_Info, "Sending %s\n", commandBuffer );
+    ssize_t bytes_sent = write( gDevices[ deviceIdx ].mSocketId, &frame, sizeof(frame) );
 
-    int numBytesToSend = strlen( commandBuffer );
-    int numBytesWritten = ftdi_write_data( &gContext, (unsigned char*)commandBuffer, numBytesToSend );
-    if ( numBytesWritten < numBytesToSend )
+    if ( sizeof(frame) != bytes_sent )
     {
-        LogMsg( eV_Error, "Error: Couldn't send all bytes. Result was %i\n", numBytesWritten );
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
+        LogMsg( eV_Error, "Error: Unable to send CAN message\n" );
         return 1;
     }
 
-    /*if ( !SendCANUSBCommand( commandBuffer ) )
-    {
-        LogMsg( eV_Info, "Error: Unable to send CAN message\n" );
-        LogMsg( eV_Info, "--- Leaving Send Routine\n" );
-        return 1;
-    }*/
-
-    LogMsg( eV_Info, "--- Leaving Send Routine\n" );
+    LogMsg( eV_Info, "--- Message sent\n" );
     return 0;
 }
 
 //--------------------------------------------------------------------------------------------------
-eBaudRate TranslateBaudRate( const char* optarg )
-{
-    if(!strcmp( optarg, "1M")) return eBR_1M;
-    if(!strcmp( optarg, "500K")) return eBR_500K;
-    if(!strcmp( optarg, "250K")) return eBR_250K;
-    if(!strcmp( optarg, "125K")) return eBR_125K;
-    if(!strcmp( optarg, "100K")) return eBR_100K;
-    if(!strcmp( optarg, "50K")) return eBR_50K;
-    if(!strcmp( optarg, "20K")) return eBR_20K;
-    if(!strcmp( optarg, "10K")) return eBR_10K;
-    if(!strcmp( optarg, "5K"))
-    {
-        LogMsg( eV_Warning, "Warning: 5K is unhandled baud rate. Ignoring...\n" );
-        return eBR_Invalid;
-    }
-    if(!strcmp( optarg, "none")) return eBR_Invalid;
-    return eBR_Invalid;
-}
-
-//--------------------------------------------------------------------------------------------------
+// NOTE: We can't set the baud rate programmatically for a SocketCAN device as it may be shared
+// by multiple applications. It has to be set system wide.
 COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudRate )
 {
-    LogMsg( eV_Error, "_-----> Trying to open SocketCAN device\n" );
-    return NULL;
-/*
-    if ( eDS_Active == gDriverState )
+    if ( eDS_Inactive == gDriverState )
     {
-        return (COM_DeviceHandle)&gContext;
+        // Setup driver if this is the first time this routine has been called
+        for ( int32_t i = 0; i < MAX_NUM_DEVICES; i++ )
+        {
+            gDevices[ i ].mbInUse = false;
+        }
+
+        gDriverState = eDS_Active;
+    }
+
+    // Check device name
+    if ( strlen( deviceName ) > IF_NAMESIZE-1 )
+    {
+        LogMsg( eV_Error, "Device name is to long. Max length is %i\n", IF_NAMESIZE-1 );
+        return NULL;
+    }
+
+    // Check to see if the device is already open
+    for ( int32_t i = 0; i < MAX_NUM_DEVICES; i++ )
+    {
+        if ( gDevices[ i ].mbInUse
+            && strncmp( gDevices[ i ].mName, deviceName, IF_NAMESIZE ) == 0 )
+        {
+            LogMsg( eV_Error, "%s is already open\n", deviceName );
+            return NULL;
+        }
     }
 
     LogMsg( eV_Info, "Trying to open CANUSB driver\n" );
 
-    // Setup a rolling buffer to take the incoming data
-    RB_Init( &gReadBuffer, gReadBufferData, sizeof( gReadBufferData ) );
-
-    // Initialise the FTDI library
-    if ( ftdi_init( &gContext ) < 0 )
+    // Look for an empty slot
+    int32_t deviceIdx = -1;
+    for ( int32_t i = 0; i < MAX_NUM_DEVICES; i++ )
     {
-        LogMsg( eV_Error, "Error: ftdi_init failed\n" );
-        return NULL;
+        if ( !gDevices[ i ].mbInUse )
+        {
+            deviceIdx = i;
+            break;
+        }
     }
 
-    // Set a 3 second read and write timeout
-    gContext.usb_read_timeout = 3000;
-    gContext.usb_write_timeout = 3000;
-    ftdi_read_data_set_chunksize( &gContext, READ_BUFFER_CHUNK_SIZE );
+    if ( -1 == deviceIdx )
+    {
+        LogMsg( eV_Error, "Unable to find slot for device. Please increase MAX_NUM_DEVICES\n" );
+        return NULL;
+    }
 
     // Open the device
-    int result = ftdi_usb_open( &gContext, CANUSB_VENDOR_ID, CANUSB_PRODUCT_ID );
-    if( result < 0 )
+    strcpy( gDevices[ deviceIdx ].mName, deviceName );
+    gDevices[ deviceIdx ].mSocketId = socket( PF_CAN, SOCK_RAW, CAN_RAW );
+    if ( gDevices[ deviceIdx ].mSocketId < 0 )
     {
-        LogMsg( eV_Error, "Error: ftdi_usb_open failed. result=%d - %s\n", result, gContext.error_str );
-    LogMsg( eV_Error, "=== Did you install udev/01-ftdi.rules?\n" );
-        ftdi_deinit( &gContext );
+        LogMsg( eV_Error, "Unable to open socket\n" );
         return NULL;
     }
 
-    LogMsg( eV_Info, "Opened FTDI\n" );
+    // Specify non-blocking operation
+    fcntl( gDevices[ deviceIdx ].mSocketId, F_SETFL, O_NONBLOCK );
 
-    // Reset the CANUSB
-    LogMsg( eV_Info, "Reset reply = %i\n", ftdi_usb_reset( &gContext ) );
-    LogMsg( eV_Info, "Purge reply = %i\n", ftdi_usb_purge_buffers( &gContext ) );
+    // Locate the interface we wish to use
+    struct ifreq ifr;
+    strcpy( ifr.ifr_name, deviceName );
 
-    sleep( 1 );     // Short sleep to give the device time to settle
-
-    SendResetMessage();
-    LogMsg( eV_Info, "Sent reset message\n" );
-
-    // Set the baudrate
-    eBaudRate newBaudRate = TranslateBaudRate( baudRate );
-    if ( eBR_Invalid != newBaudRate )
+    // ifr.ifr_ifindex gets filled with that device's index
+    if ( ioctl( gDevices[ deviceIdx ].mSocketId, SIOCGIFINDEX, &ifr ) < 0 )
     {
-        gBaudRate = newBaudRate;
-    }
-
-    char commandBuffer[ 64 ];
-    sprintf( commandBuffer, "S%i\r", gBaudRate );
-    if ( !SendCANUSBCommand( commandBuffer ) )
-    {
-        LogMsg( eV_Error, "Error: Unable to set CANUSB baud rate\n" );
-        ftdi_usb_close( &gContext );
-        ftdi_deinit( &gContext );
+        LogMsg( eV_Error, "Can't open %s\n", deviceName );
         return NULL;
     }
 
-    LogMsg( eV_Info, "Set baud rate\n" );
-
-    // Open the channel
-    if ( !SendCANUSBCommand( "O\r" ) )
+    // Select that CAN interface, and bind the socket to it. */
+    struct sockaddr_can addr;
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = ifr.ifr_ifindex;
+    if ( bind( gDevices[ deviceIdx ].mSocketId, (struct sockaddr*)&addr, sizeof(addr) ) < 0 )
     {
-        LogMsg( eV_Error, "Error: Unable to open CANUSB channel\n" );
-        ftdi_usb_close( &gContext );
-        ftdi_deinit( &gContext );
+        LogMsg( eV_Error, "Can't bind %s to socket\n", deviceName );
         return NULL;
     }
+
+    // Setup a rolling buffer to take the incoming data
+    RB_Init( &gDevices[ deviceIdx ].mReadBuffer,
+        gDevices[ deviceIdx ].mReadBufferData, sizeof( gDevices[ deviceIdx ].mReadBufferData ) );
+
+    gDevices[ deviceIdx ].mbInUse = true;
 
     LogMsg( eV_Info, "Opened channel\n" );
 
     // Success
-    gDriverState = eDS_Active;
-    return (COM_DeviceHandle)&gContext;*/
+    return deviceIdxToHandle( deviceIdx );
 }
 
 //--------------------------------------------------------------------------------------------------
 void COM_DriverDeviceClose( COM_DeviceHandle handle )
 {
-   /* if ( eDS_Inactive != gDriverState )
+    int32_t deviceIdx = handleToDeviceIdx( handle );
+    if ( deviceIdx >= 0 && deviceIdx < MAX_NUM_DEVICES
+        && gDevices[ deviceIdx ].mbInUse )
     {
-        SendCANUSBCommand( "C\r" );
-        ftdi_usb_close( &gContext );
-        ftdi_deinit( &gContext );
-        gDriverState = eDS_Inactive;
-    }*/
+        close( gDevices[ deviceIdx ].mSocketId );
+        RB_Deinit( &gDevices[ deviceIdx ].mReadBuffer );
+        gDevices[ deviceIdx ].mbInUse = false;
+    }
 }
 
