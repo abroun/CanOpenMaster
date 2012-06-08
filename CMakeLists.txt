@@ -36,20 +36,26 @@ INSTALL( DIRECTORY ${PROJECT_SOURCE_DIR}/include/CanOpenMaster DESTINATION inclu
 #-------------------------------------------------------------------------------
 # CanUSB driver
 #-------------------------------------------------------------------------------
-SET( CanUSBDriverFiles 
-    drivers/canusb/canusb.c
-    drivers/common/Logging.c
-    drivers/common/RollingBuffer.c
-    ) 
 
-ADD_LIBRARY( CanUSBDriverShared SHARED ${CanUSBDriverFiles} )
-SET_TARGET_PROPERTIES( CanUSBDriverShared 
-    PROPERTIES OUTPUT_NAME CanUSBDriver )
-    
-TARGET_LINK_LIBRARIES( CanUSBDriverShared ftdi )
+# Only make the dirver if we can find the FTDI library
+FIND_FILE( FTDI_HEADER ftdi.h )
 
-INSTALL( TARGETS CanUSBDriverShared
-        LIBRARY DESTINATION lib )
+IF( FTDI_HEADER )
+	SET( CanUSBDriverFiles 
+	    drivers/canusb/canusb.c
+	    drivers/common/Logging.c
+	    drivers/common/RollingBuffer.c
+	    ) 
+	
+	ADD_LIBRARY( CanUSBDriverShared SHARED ${CanUSBDriverFiles} )
+	SET_TARGET_PROPERTIES( CanUSBDriverShared 
+	    PROPERTIES OUTPUT_NAME CanUSBDriver )
+	    
+	TARGET_LINK_LIBRARIES( CanUSBDriverShared ftdi )
+	
+	INSTALL( TARGETS CanUSBDriverShared
+	        LIBRARY DESTINATION lib ) 
+ENDIF()
         
 #-------------------------------------------------------------------------------
 # SocketCAN driver
