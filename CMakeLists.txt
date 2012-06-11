@@ -32,6 +32,24 @@ INSTALL( TARGETS CanOpenMasterShared
 
 INSTALL( DIRECTORY ${PROJECT_SOURCE_DIR}/include/CanOpenMaster DESTINATION include
           FILES_MATCHING PATTERN "*.h" )
+    
+#-------------------------------------------------------------------------------
+# Can4Linux driver
+#-------------------------------------------------------------------------------
+SET( Can4LinuxDriverFiles 
+    drivers/can4linux/can4linux.c
+    drivers/common/Logging.c
+    drivers/common/RollingBuffer.c
+    ) 
+
+ADD_LIBRARY( Can4LinuxDriverShared SHARED ${Can4LinuxDriverFiles} )
+SET_TARGET_PROPERTIES( Can4LinuxDriverShared 
+    PROPERTIES OUTPUT_NAME Can4LinuxDriver )
+    
+TARGET_LINK_LIBRARIES( Can4LinuxDriverShared )
+
+INSTALL( TARGETS Can4LinuxDriverShared
+        LIBRARY DESTINATION lib )
           
 #-------------------------------------------------------------------------------
 # CanUSB driver

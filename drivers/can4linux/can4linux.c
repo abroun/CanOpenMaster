@@ -1,35 +1,17 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-
-#define __USE_MISC
-#include <net/if.h>
-
-#include <linux/can.h>
-#include <linux/can/raw.h>
-#include <string.h>
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
-#include <stdbool.h>
-#include <stdarg.h>
 #include <unistd.h>
-#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "can4linux.h"
 #include "CanOpenMaster/can.h"
 #include "drivers/common/Logging.h"
 #include "drivers/common/RollingBuffer.h"
-
-/* At time of writing, these constants are not defined in the headers */
-#ifndef PF_CAN
-#define PF_CAN 29
-#endif
-
-#ifndef AF_CAN
-#define AF_CAN PF_CAN
-#endif
 
 typedef enum eDriverState
 {
@@ -37,10 +19,27 @@ typedef enum eDriverState
     eDS_Active
 } eDriverState;
 
+typedef enum eBaudRate
+{
+    eBR_Invalid = -1,
+    eBR_5K = 5,
+    eBR_10K = 10,
+    eBR_20K = 20,
+    eBR_50K = 50,
+    eBR_100K = 100,
+    eBR_125K = 125,
+    eBR_250K = 250,
+    eBR_500K = 500,
+    eBR_800K = 800,
+    eBR_1M = 1000,
+} eBaudRate;
+
+#define MAX_DEVICE_NAMESIZE 128
+
 typedef struct
 {
-    char mName[ IF_NAMESIZE ];
-    int32_t mSocketId;
+    char mName[ MAX_DEVICE_NAMESIZE ];
+    int32_t mFileDescriptor;
     bool mbInUse;
     RollingBuffer mReadBuffer;
     uint8_t mReadBufferData[ 64*1024 ];
@@ -84,20 +83,22 @@ uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgO
         return 1;
     }
 
-    struct can_frame frame;
+    canmsg_t msgBuffer[ 100 ];
+    ssize_t numMsgs = read( gDevices[ deviceIdx ].mFileDescriptor, &msgBuffer, sizeof( canmsg_t ) );
 
-    ssize_t nbytes = read( gDevices[ deviceIdx ].mSocketId, &frame, sizeof(struct can_frame) );
 
-    if ( nbytes <= 0 )
+
+    if ( numMsgs <= 0 )
     {
         LogMsg( eV_Info, "No message found in buffer. User should retry\n" );
         return 2;
     }
 
-    if ( nbytes < sizeof(struct can_frame) )
+    printf( "Got %i msgs\n", numMsgs );
+
+    if ( numMsgs > 1 )
     {
-        LogMsg( eV_Error, "Incomplete CAN frame\n" );
-        return 1;
+    	LogMsg( eV_Error, "Too many messages returned. Dropping messages\n" );
     }
 
     /*
@@ -109,16 +110,16 @@ uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgO
      * bit 31   : frame format flag (0 = standard 11 bit, 1 = extended 29 bit)
      */
 
-    if ( frame.can_id & 0x80000000 )
+    if ( msgBuffer[ 0 ].id & 0x80000000 )
     {
-        LogMsg( eV_Error, "Extended address received. Not handled yet\n" );
-        return 1;
+        //LogMsg( eV_Error, "Extended address received. Not handled yet\n" );
+        //return 1;
     }
 
-    pMsgOut->mRtr = ( frame.can_id & 0x40000000 ? 1 : 0 );
-    pMsgOut->mCobId = frame.can_id & 0x7FF;
-    pMsgOut->mLength = frame.can_dlc;
-    memcpy( pMsgOut->mData, frame.data, sizeof( frame.data ) );
+    pMsgOut->mRtr = ( msgBuffer[ 0 ].id & 0x40000000 ? 1 : 0 );
+    pMsgOut->mCobId = msgBuffer[ 0 ].id & 0x7FF;
+    pMsgOut->mLength = msgBuffer[ 0 ].length;
+    memcpy( pMsgOut->mData, msgBuffer[ 0 ].data, sizeof( msgBuffer[ 0 ].data ) );
 
     LogMsg( eV_Info, "--- Message read\n" );
     return 0;
@@ -138,19 +139,22 @@ uint8_t COM_DriverSendMessage( COM_DeviceHandle handle, COM_CanMessage* pMsg )
     }
 
     // Send a message to the CAN bus
-    struct can_frame frame;
-    frame.can_id = pMsg->mCobId;
+    canmsg_t canMsg;
+    canMsg.cob = pMsg->mCobId;
+    canMsg.id = pMsg->mCobId;
+    canMsg.flags = 0;
     if ( pMsg->mRtr )
     {
-        frame.can_id |= 0x40000000;
+    	canMsg.flags |= MSG_RTR;
     }
 
-    frame.can_dlc = pMsg->mLength;
-    memcpy( frame.data, pMsg->mData, sizeof( pMsg->mData ) );
+    canMsg.length = pMsg->mLength;
+    memcpy( canMsg.data, pMsg->mData, sizeof( pMsg->mData ) );
 
-    ssize_t bytes_sent = write( gDevices[ deviceIdx ].mSocketId, &frame, sizeof(frame) );
+    ssize_t blocksSent = write( gDevices[ deviceIdx ].mFileDescriptor, &canMsg, sizeof( canMsg ) );
 
-    if ( sizeof(frame) != bytes_sent )
+    //printf( "Sent %i msgs\n", blocksSent );
+    if ( sizeof( canMsg ) != blocksSent )
     {
         LogMsg( eV_Error, "Error: Unable to send CAN message\n" );
         return 1;
@@ -161,8 +165,42 @@ uint8_t COM_DriverSendMessage( COM_DeviceHandle handle, COM_CanMessage* pMsg )
 }
 
 //--------------------------------------------------------------------------------------------------
-// NOTE: We can't set the baud rate programmatically for a SocketCAN device as it may be shared
-// by multiple applications. It has to be set system wide.
+static void setBaudRate( int32_t fd, eBaudRate baudRate )
+{
+	if ( eBR_Invalid != baudRate )
+	{
+		Config_par_t  cfg;
+		volatile Command_par_t cmd;
+
+		cmd.cmd = CMD_STOP;
+		ioctl( fd, CAN_IOCTL_COMMAND, &cmd );
+
+		cfg.target = CONF_TIMING;
+		cfg.val1   = baudRate;
+		ioctl( fd, CAN_IOCTL_CONFIG, &cfg );
+
+		cmd.cmd = CMD_START;
+		ioctl( fd, CAN_IOCTL_COMMAND, &cmd );
+	}
+}
+
+//--------------------------------------------------------------------------------------------------
+static eBaudRate translateBaudRate( const char* optarg )
+{
+    if(!strcmp( optarg, "1M")) return eBR_1M;
+    if(!strcmp( optarg, "500K")) return eBR_500K;
+    if(!strcmp( optarg, "250K")) return eBR_250K;
+    if(!strcmp( optarg, "125K")) return eBR_125K;
+    if(!strcmp( optarg, "100K")) return eBR_100K;
+    if(!strcmp( optarg, "50K")) return eBR_50K;
+    if(!strcmp( optarg, "20K")) return eBR_20K;
+    if(!strcmp( optarg, "10K")) return eBR_10K;
+    if(!strcmp( optarg, "5K"))  return eBR_5K;
+    if(!strcmp( optarg, "none")) return eBR_Invalid;
+    return eBR_Invalid;
+}
+
+//--------------------------------------------------------------------------------------------------
 COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudRate )
 {
     if ( eDS_Inactive == gDriverState )
@@ -176,10 +214,18 @@ COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudR
         gDriverState = eDS_Active;
     }
 
-    // Check device name
-    if ( strlen( deviceName ) > IF_NAMESIZE-1 )
+    // Check baud rate
+    eBaudRate baudRateValue = translateBaudRate( baudRate );
+    if ( eBR_Invalid == baudRateValue )
     {
-        LogMsg( eV_Error, "Device name is to long. Max length is %i\n", IF_NAMESIZE-1 );
+    	LogMsg( eV_Error, "Invalid baud rate of %s given\n", baudRate );
+		return NULL;
+    }
+
+    // Check device name
+    if ( strlen( deviceName ) > MAX_DEVICE_NAMESIZE-1 )
+    {
+        LogMsg( eV_Error, "Device name is to long. Max length is %i\n", MAX_DEVICE_NAMESIZE-1 );
         return NULL;
     }
 
@@ -187,7 +233,7 @@ COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudR
     for ( int32_t i = 0; i < MAX_NUM_DEVICES; i++ )
     {
         if ( gDevices[ i ].mbInUse
-            && strncmp( gDevices[ i ].mName, deviceName, IF_NAMESIZE ) == 0 )
+            && strncmp( gDevices[ i ].mName, deviceName, MAX_DEVICE_NAMESIZE ) == 0 )
         {
             LogMsg( eV_Error, "%s is already open\n", deviceName );
             return NULL;
@@ -213,36 +259,15 @@ COM_DeviceHandle COM_DriverDeviceOpen( const char* deviceName, const char* baudR
 
     // Open the device
     strcpy( gDevices[ deviceIdx ].mName, deviceName );
-    gDevices[ deviceIdx ].mSocketId = socket( PF_CAN, SOCK_RAW, CAN_RAW );
-    if ( gDevices[ deviceIdx ].mSocketId < 0 )
+    gDevices[ deviceIdx ].mFileDescriptor = open( deviceName, O_RDWR | O_NONBLOCK );
+    if ( gDevices[ deviceIdx ].mFileDescriptor < 0 )
     {
-        LogMsg( eV_Error, "Unable to open socket\n" );
+        LogMsg( eV_Error, "Unable to open CAN device %s\n", deviceName );
         return NULL;
     }
 
-    // Specify non-blocking operation
-    fcntl( gDevices[ deviceIdx ].mSocketId, F_SETFL, O_NONBLOCK );
-
-    // Locate the interface we wish to use
-    struct ifreq ifr;
-    strcpy( ifr.ifr_name, deviceName );
-
-    // ifr.ifr_ifindex gets filled with that device's index
-    if ( ioctl( gDevices[ deviceIdx ].mSocketId, SIOCGIFINDEX, &ifr ) < 0 )
-    {
-        LogMsg( eV_Error, "Can't open %s\n", deviceName );
-        return NULL;
-    }
-
-    // Select that CAN interface, and bind the socket to it. */
-    struct sockaddr_can addr;
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
-    if ( bind( gDevices[ deviceIdx ].mSocketId, (struct sockaddr*)&addr, sizeof(addr) ) < 0 )
-    {
-        LogMsg( eV_Error, "Can't bind %s to socket\n", deviceName );
-        return NULL;
-    }
+    // Set the baud rate
+    setBaudRate( gDevices[ deviceIdx ].mFileDescriptor, baudRateValue );
 
     // Setup a rolling buffer to take the incoming data
     RB_Init( &gDevices[ deviceIdx ].mReadBuffer,
@@ -263,9 +288,8 @@ void COM_DriverDeviceClose( COM_DeviceHandle handle )
     if ( deviceIdx >= 0 && deviceIdx < MAX_NUM_DEVICES
         && gDevices[ deviceIdx ].mbInUse )
     {
-        close( gDevices[ deviceIdx ].mSocketId );
+        close( gDevices[ deviceIdx ].mFileDescriptor );
         RB_Deinit( &gDevices[ deviceIdx ].mReadBuffer );
         gDevices[ deviceIdx ].mbInUse = false;
     }
 }
-
