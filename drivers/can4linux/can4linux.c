@@ -84,7 +84,7 @@ uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgO
     }
 
     canmsg_t msgBuffer[ 100 ];
-    ssize_t numMsgs = read( gDevices[ deviceIdx ].mFileDescriptor, &msgBuffer, sizeof( canmsg_t ) );
+    ssize_t numMsgs = read( gDevices[ deviceIdx ].mFileDescriptor, &msgBuffer, 1 ); //sizeof( canmsg_t ) );
 
 
 
@@ -94,7 +94,7 @@ uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgO
         return 2;
     }
 
-    printf( "Got %i msgs\n", numMsgs );
+    //printf( "Got %i msgs\n", numMsgs );
 
     if ( numMsgs > 1 )
     {
@@ -112,8 +112,8 @@ uint8_t COM_DriverReceiveMessage( COM_DeviceHandle handle, COM_CanMessage* pMsgO
 
     if ( msgBuffer[ 0 ].id & 0x80000000 )
     {
-        //LogMsg( eV_Error, "Extended address received. Not handled yet\n" );
-        //return 1;
+        LogMsg( eV_Error, "Extended address received. Not handled yet\n" );
+        return 1;
     }
 
     pMsgOut->mRtr = ( msgBuffer[ 0 ].id & 0x40000000 ? 1 : 0 );
@@ -151,10 +151,10 @@ uint8_t COM_DriverSendMessage( COM_DeviceHandle handle, COM_CanMessage* pMsg )
     canMsg.length = pMsg->mLength;
     memcpy( canMsg.data, pMsg->mData, sizeof( pMsg->mData ) );
 
-    ssize_t blocksSent = write( gDevices[ deviceIdx ].mFileDescriptor, &canMsg, sizeof( canMsg ) );
+    ssize_t blocksSent = write( gDevices[ deviceIdx ].mFileDescriptor, &canMsg, 1 ); // sizeof( canMsg ) );
 
     //printf( "Sent %i msgs\n", blocksSent );
-    if ( sizeof( canMsg ) != blocksSent )
+    if ( 1 != blocksSent ) //sizeof( canMsg ) != blocksSent )
     {
         LogMsg( eV_Error, "Error: Unable to send CAN message\n" );
         return 1;
