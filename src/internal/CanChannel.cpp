@@ -398,6 +398,12 @@ void CanChannel::ProcessMessages()
 //------------------------------------------------------------------------------
 void CanChannel::CanOpenReadThread( CanChannel* pThis )
 {
+	// This limit is set to stop the read thread from swamping the CPU. At the
+	// maximum baud rate of 1MBs it should be sufficient for messages with a
+	// 4 byte payload
+	const uint32_t MAX_NUM_READS_PER_SECOND = 16000;
+	const uint32_t MICROSECONDS_FOR_MESSAGE = 1000000 / MAX_NUM_READS_PER_SECOND;
+
     while ( !pThis->mbShuttingDown )
     {
         if ( MESSAGE_BUFFER_SIZE == pThis->mMessageProduceCount - pThis->mMessageConsumeCount )
@@ -418,6 +424,9 @@ void CanChannel::CanOpenReadThread( CanChannel* pThis )
         {
             boost::thread::yield();
         }
+
+        boost::thread::sleep( boost::get_system_time()
+        	+ boost::posix_time::microseconds( MICROSECONDS_FOR_MESSAGE ) );
     }
     
     printf( "Shutting down read thread\n" );
